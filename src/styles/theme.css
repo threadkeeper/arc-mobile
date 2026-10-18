@@ -1,0 +1,702 @@
+/* ==========================================================================
+   ARC Raiders Mobile Companion — Dark Sci-Fi Tactical Theme (theme.css)
+   ========================================================================== */
+
+:root {
+  --bg-void: #070b12;
+  --bg-shell: #0c121d;
+  --bg-card: #121a29;
+  --bg-card-elevated: #172235;
+  --border-subtle: #1f2e47;
+  --border-bright: #2e4569;
+
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+
+  --accent-cyan: #22d3ee;
+  --accent-amber: #f59e0b;
+  --accent-purple: #c084fc;
+  --accent-emerald: #10b981;
+  --accent-red: #ef4444;
+  --accent-red-bright: #ff4d4f;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background-color: var(--bg-void);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Mobile-first centered phone frame on desktop, full-bleed on mobile screens */
+.app-mobile-frame {
+  max-width: 480px;
+  min-height: 100vh;
+  margin: 0 auto;
+  background: var(--bg-shell);
+  border-left: 1px solid var(--border-subtle);
+  border-right: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 82px;
+  position: relative;
+}
+
+@media (max-width: 500px) {
+  .app-mobile-frame {
+    max-width: 100%;
+    border-left: none;
+    border-right: none;
+  }
+}
+
+/* Header & Telemetry Bar */
+.app-header {
+  padding: 14px 16px 10px;
+  background: linear-gradient(180deg, #131d31 0%, #0c121d 100%);
+  border-bottom: 1px solid var(--border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+}
+
+.header-top-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.brand-title {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.brand-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.72rem;
+  color: var(--accent-cyan);
+  letter-spacing: 0.03em;
+}
+
+.header-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.btn-tactical {
+  appearance: none;
+  border: 1px solid var(--border-bright);
+  background: var(--bg-card-elevated);
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+.btn-tactical:hover {
+  border-color: var(--accent-cyan);
+  background: #1c2c44;
+}
+
+.btn-tactical-primary {
+  background: rgba(34, 211, 238, 0.14);
+  border-color: var(--accent-cyan);
+  color: var(--accent-cyan);
+}
+
+.player-telemetry-strip {
+  margin-top: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  background: rgba(15, 23, 42, 0.75);
+  padding: 6px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border-subtle);
+}
+
+.telemetry-stat strong {
+  color: var(--text-primary);
+}
+
+/* Top Tab Pills */
+.top-tab-bar {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--bg-shell);
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.tab-pill-btn {
+  appearance: none;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-card);
+  color: var(--text-secondary);
+  font-size: 0.74rem;
+  font-weight: 700;
+  padding: 8px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  text-align: center;
+  transition: all 0.15s ease;
+}
+
+.tab-pill-btn.active {
+  background: rgba(34, 211, 238, 0.16);
+  color: var(--accent-cyan);
+  border-color: var(--accent-cyan);
+  box-shadow: 0 0 10px rgba(34, 211, 238, 0.15);
+}
+
+/* Main Content Area */
+.app-main-content {
+  padding: 12px;
+  flex: 1;
+}
+
+.tab-view {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* Foundry Agent Banner */
+.agent-banner {
+  background: linear-gradient(135deg, rgba(34, 211, 238, 0.12) 0%, rgba(192, 132, 252, 0.1) 100%);
+  border: 1px solid rgba(34, 211, 238, 0.35);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+
+.agent-banner-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.agent-pulse-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-cyan);
+  box-shadow: 0 0 8px var(--accent-cyan);
+}
+
+.agent-banner-label {
+  font-size: 0.72rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent-cyan);
+}
+
+.agent-banner-text {
+  margin: 0;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: var(--text-primary);
+}
+
+/* Tactical Cards */
+.tactical-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: 10px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.section-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.section-subtitle {
+  margin: 2px 0 0;
+  font-size: 0.74rem;
+  color: var(--text-secondary);
+}
+
+/* Tab 1: 5-Raid Readiness Grid */
+.readiness-pill {
+  background: rgba(16, 185, 129, 0.16);
+  color: var(--accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+  font-size: 0.76rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 999px;
+}
+
+.progress-track {
+  width: 100%;
+  height: 8px;
+  background: #090e17;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border-subtle);
+}
+
+.progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-emerald));
+  transition: width 0.25s ease;
+}
+
+.readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px;
+}
+
+.readiness-cell {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.readiness-cell-ready {
+  border-color: rgba(16, 185, 129, 0.45);
+}
+
+.readiness-cell-short {
+  border-color: rgba(245, 158, 11, 0.45);
+}
+
+.readiness-cell-label {
+  font-size: 0.76rem;
+  color: var(--text-secondary);
+}
+
+.readiness-cell-value {
+  font-size: 0.84rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+/* Action Queue */
+.slots-freed-total-badge {
+  background: rgba(34, 211, 238, 0.16);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.action-queue-list,
+.protected-list,
+.sell-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.action-queue-card {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.action-queue-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.action-badge-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.action-badge {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-transform: uppercase;
+}
+
+.action-badge-recycle {
+  background: rgba(34, 211, 238, 0.18);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(34, 211, 238, 0.4);
+}
+
+.action-badge-refine {
+  background: rgba(192, 132, 252, 0.18);
+  color: var(--accent-purple);
+  border: 1px solid rgba(192, 132, 252, 0.4);
+}
+
+.action-badge-craft {
+  background: rgba(16, 185, 129, 0.18);
+  color: var(--accent-emerald);
+  border: 1px solid rgba(16, 185, 129, 0.4);
+}
+
+.slots-freed-chip {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--accent-emerald);
+}
+
+.action-io-flow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.78rem;
+  background: rgba(7, 11, 18, 0.55);
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+
+.io-arrow {
+  color: var(--accent-cyan);
+  font-weight: 800;
+}
+
+.action-reason {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+/* Protected Rare & Upgrade Lock-List */
+.lock-warning-badge,
+.lock-mini-badge {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 3px 7px;
+  border-radius: 5px;
+  letter-spacing: 0.03em;
+}
+
+.protected-item-row,
+.sell-item-row,
+.annotated-inventory-row {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.protected-item-header,
+.sell-item-header,
+.inventory-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.protected-reasons,
+.requirement-badges-row,
+.missing-required-for-row,
+.tag-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+/* Sell Immediately */
+.coins-total-badge,
+.sell-coins-chip {
+  background: rgba(245, 158, 11, 0.18);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.45);
+  font-size: 0.75rem;
+  font-weight: 800;
+  padding: 3px 8px;
+  border-radius: 6px;
+}
+
+/* Tab 2: Live Map Conditions & Raid Cards */
+.map-conditions-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.map-condition-card {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.map-condition-top,
+.map-condition-event {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.bonus-loot-tag,
+.target-missing-chip,
+.expected-reward-chip {
+  font-size: 0.7rem;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: rgba(34, 211, 238, 0.12);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(34, 211, 238, 0.3);
+}
+
+.raid-card-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.raid-rank-badge {
+  background: var(--accent-cyan);
+  color: #041019;
+  font-weight: 900;
+  font-size: 0.9rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.raid-title {
+  margin: 0;
+  font-size: 0.94rem;
+  font-weight: 800;
+}
+
+.loadout-fit-badge {
+  display: inline-block;
+  font-size: 0.74rem;
+  font-weight: 800;
+  padding: 4px 8px;
+  border-radius: 6px;
+}
+
+.loadout-fit-green {
+  background: rgba(16, 185, 129, 0.18);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.5);
+}
+
+.raid-steps-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.raid-step-item {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 8px 10px;
+}
+
+.raid-step-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.raid-step-instruction,
+.raid-step-caution {
+  margin: 2px 0;
+  font-size: 0.77rem;
+}
+
+.raid-step-caution {
+  color: #fbbf24;
+}
+
+/* ==========================================================================
+   Tab 3: Inventory Smash — Requirement Badges & Vivid Red Missing Text
+   ========================================================================== */
+
+.req-badge {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 3px 8px;
+  border-radius: 6px;
+  line-height: 1.3;
+}
+
+/* Past (Completed) -> Muted Grey */
+.req-badge-past {
+  background-color: #1e293b;
+  color: #94a3b8;
+  border: 1px solid #475569;
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+/* Future Requirement Categories -> Distinct Semantic Colors */
+.req-type-quest {
+  background-color: rgba(34, 211, 238, 0.16);
+  color: #22d3ee;
+  border: 1px solid rgba(34, 211, 238, 0.5);
+}
+
+.req-type-hideout_upgrade {
+  background-color: rgba(245, 158, 11, 0.16);
+  color: #fbbf24;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+}
+
+.req-type-project {
+  background-color: rgba(192, 132, 252, 0.16);
+  color: #c084fc;
+  border: 1px solid rgba(192, 132, 252, 0.5);
+}
+
+.req-type-weapon_upgrade {
+  background-color: rgba(16, 185, 129, 0.16);
+  color: #34d399;
+  border: 1px solid rgba(16, 185, 129, 0.5);
+}
+
+/* Missing Required Items -> Vivid Red Highlight */
+.missing-item-row {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.missing-item-red,
+.missing-red-text {
+  color: #ef4444 !important;
+  font-weight: 800;
+}
+
+/* Farming Guide */
+.farming-item-card {
+  background: var(--bg-card-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.farming-item-header,
+.farming-loc-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.farming-location-box {
+  background: rgba(7, 11, 18, 0.6);
+  border: 1px solid var(--border-subtle);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 0.76rem;
+}
+
+/* Sticky Bottom Mobile Navigation Bar */
+.bottom-mobile-nav {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 100%;
+  max-width: 480px;
+  background: rgba(12, 18, 29, 0.96);
+  backdrop-filter: blur(10px);
+  border-top: 1px solid var(--border-bright);
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  padding: 8px 10px;
+  z-index: 30;
+}
+
+.bottom-nav-btn {
+  appearance: none;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  padding: 8px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.bottom-nav-btn.active {
+  background: rgba(34, 211, 238, 0.16);
+  color: var(--accent-cyan);
+  border-color: rgba(34, 211, 238, 0.45);
+}

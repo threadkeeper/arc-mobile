@@ -1,0 +1,9 @@
+{
+  "name": "ARC Raiders Tactical Companion",
+  "short_name": "ARC Companion",
+  "description": "5-Raid Prep, Top 3 Raid Ideas & Inventory Smash powered by Azure AI Foundry",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0b0f17",
+  "theme_color": "#06b6d4"
+}

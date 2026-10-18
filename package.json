@@ -1,0 +1,31 @@
+{
+  "name": "arc-mobile",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "ARC Raiders Mobile-Friendly Web Companion — Autonomous Azure AI Foundry Agent for 5-Raid Prep, Top 3 Raid Ideas, and Inventory Smash.",
+  "scripts": {
+    "dev": "vite --host",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview --host",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "proxy": "node --experimental-strip-types server/foundryProxy.ts"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.2.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.5",
+    "vitest": "^2.1.8"
+  }
+}
