@@ -30,6 +30,7 @@ if (-not $SkipAzureToken) {
 }
 
 $env:PORT = "$ProxyPort"
+$env:FOUNDRY_PROXY_PORT = "$ProxyPort"
 
 Write-Host "Starting Foundry Agent Proxy on http://127.0.0.1:$ProxyPort ..." -ForegroundColor Green
 $proxyProc = Start-Process -FilePath "node" -ArgumentList @("--experimental-strip-types", "server/foundryProxy.ts") -WorkingDirectory $RepoRoot -PassThru -NoNewWindow

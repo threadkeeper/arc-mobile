@@ -139,6 +139,30 @@ export function App(): React.ReactElement {
     void executeSyncAndFoundryLoop(saved);
   };
 
+  const handlePlayerStateUpdatedFromConsole = (
+    nextState: PlayerProgressState,
+    newCreds?: AuthCredentials,
+  ) => {
+    setPlayerState(nextState);
+    if (newCreds) {
+      setCredentials(newCreds);
+    }
+    const immediatePlan = createInitialSynchronousPlan(
+      nextState,
+      foundryPlan.tab2Raids.liveMapConditions,
+    );
+    setFoundryPlan(immediatePlan);
+    void (async () => {
+      try {
+        const liveConditions = await fetchLiveMapConditions();
+        const enriched = await runAutonomousFoundryAgent(nextState, liveConditions);
+        setFoundryPlan(enriched);
+      } catch {
+        // Keep immediate deterministic plan if offline
+      }
+    })();
+  };
+
   const handlePullFromBrowser = async () => {
     const pulled = await pullAuthFromBrowserEnvironment();
     if (pulled) {
@@ -271,7 +295,9 @@ export function App(): React.ReactElement {
       <AuthModal
         isOpen={isAuthModalOpen}
         credentials={credentials}
+        playerState={playerState}
         onSave={handleSaveCredentials}
+        onPlayerStateUpdated={handlePlayerStateUpdatedFromConsole}
         onPullFromBrowser={handlePullFromBrowser}
         onClose={() => setIsAuthModalOpen(false)}
       />

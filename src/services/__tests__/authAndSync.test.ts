@@ -4,18 +4,30 @@ import {
   AUTH_STORAGE_KEY,
   DEFAULT_APP_KEY,
   clearAuthCredentials,
+  exportAuthCredentialsBackup,
+  extractArcKeyFromText,
   extractKeysFromText,
+  importAuthCredentialsBackup,
   loadAuthCredentials,
   openArcTrackerKeyPage,
   pullAuthFromBrowserEnvironment,
   saveAuthCredentials,
 } from '../authStore';
 import {
+  ARCTRACKER_V2_ENDPOINTS,
   LAST_PLAYER_STATE_STORAGE_KEY,
+  createDemoPlayerProgressState,
   fetchLiveMapConditions,
+  getDefaultLiveMapConditions,
+  syncConsoleStateWithFoundryAi,
   syncPlayerState,
 } from '../arcTrackerClient';
-import { getStaticGameCatalogSummary } from '../gameCatalogClient';
+import {
+  getCatalogItemById,
+  getStaticGameCatalogSummary,
+  mergeRemoteCatalogEnrichment,
+  searchCatalogItems,
+} from '../gameCatalogClient';
 import {
   DEFAULT_LIVE_MAP_CONDITIONS,
   DEMO_PLAYER_STATE,
@@ -37,13 +49,15 @@ describe('authStore & arcTrackerClient unit tests', () => {
     vi.restoreAllMocks();
   });
 
-  it('saves and loads AuthCredentials in both localStorage and backup cookie', () => {
+  it('saves and loads AuthCredentials in both localStorage and 365-day backup cookie (arc_raiders_auth_backup)', () => {
     const input: AuthCredentials = {
       userApiKey: 'arc_u1_speranza_veteran_99',
       appApiKey: 'arc_k1_custom_companion_key',
       savedAt: '2026-10-18T12:00:00.000Z',
       source: 'manual',
     };
+
+    expect(AUTH_COOKIE_NAME).toBe('arc_raiders_auth_backup');
 
     const saved = saveAuthCredentials(input);
     expect(saved).toEqual(input);
@@ -80,15 +94,39 @@ describe('authStore & arcTrackerClient unit tests', () => {
     expect(JSON.parse(restoredLocal!)).toEqual(input);
   });
 
+  it('exports and imports JSON token backups cleanly', () => {
+    const original: AuthCredentials = {
+      userApiKey: 'arc_u1_backup_raider_303',
+      appApiKey: 'arc_k1_backup_app_909',
+      savedAt: '2026-10-18T15:00:00.000Z',
+      source: 'manual',
+    };
+
+    const jsonBackup = exportAuthCredentialsBackup(original);
+    expect(jsonBackup).toContain('arc_u1_backup_raider_303');
+
+    clearAuthCredentials();
+    expect(loadAuthCredentials()).toBeNull();
+
+    const restored = importAuthCredentialsBackup(jsonBackup);
+    expect(restored).not.toBeNull();
+    expect(restored?.userApiKey).toBe('arc_u1_backup_raider_303');
+    expect(restored?.appApiKey).toBe('arc_k1_backup_app_909');
+    expect(loadAuthCredentials()?.userApiKey).toBe('arc_u1_backup_raider_303');
+  });
+
   it('extracts arc_u1_ and arc_k1_ keys from URL query/hash, JSON blobs, and raw text', () => {
     // 1. URL query and hash
     const fromUrl = extractKeysFromText(
-      'https://arctracker.io/settings?userKey=arc_u1_url_raider_42&appKey=arc_k1_mobile_app_01#sync',
+      'https://arctracker.io/settings?arcKey=arc_u1_url_raider_42&appKey=arc_k1_mobile_app_01#sync',
     );
     expect(fromUrl).toEqual({
       userApiKey: 'arc_u1_url_raider_42',
       appApiKey: 'arc_k1_mobile_app_01',
     });
+    expect(extractArcKeyFromText('#arc_u1_hash_token_88')).toBe(
+      'arc_u1_hash_token_88',
+    );
 
     // 2. JSON blob
     const fromJson = extractKeysFromText(
@@ -113,6 +151,7 @@ describe('authStore & arcTrackerClient unit tests', () => {
 
     // 4. Empty / unrelated text
     expect(extractKeysFromText('no valid keys here')).toEqual({});
+    expect(extractArcKeyFromText('no valid keys here')).toBeNull();
   });
 
   it('pulls auth from URL parameters first, then clipboard in pullAuthFromBrowserEnvironment', async () => {
@@ -120,7 +159,7 @@ describe('authStore & arcTrackerClient unit tests', () => {
     window.history.replaceState(
       {},
       '',
-      '/?key=arc_u1_from_query_param_88#app=arc_k1_from_hash_11',
+      '/?arcKey=arc_u1_from_query_param_88#app=arc_k1_from_hash_11',
     );
 
     const pulledFromUrl = await pullAuthFromBrowserEnvironment();
@@ -160,8 +199,11 @@ describe('authStore & arcTrackerClient unit tests', () => {
     );
   });
 
-  it('syncs player state via proxy or falls back cleanly to DEMO_PLAYER_STATE and caches in localStorage', async () => {
+  it('syncs player state via proxy or direct v2 endpoints, falling back cleanly to DEMO_PLAYER_STATE', async () => {
     // 1. Demo mode / null credentials returns DEMO_PLAYER_STATE and caches it
+    const demoSnapshot = createDemoPlayerProgressState();
+    expect(demoSnapshot.username).toBe(DEMO_PLAYER_STATE.username);
+
     const demoState = await syncPlayerState(null);
     expect(demoState.username).toBe(DEMO_PLAYER_STATE.username);
     expect(demoState.syncSource).toBe('demo-profile');
@@ -200,19 +242,138 @@ describe('authStore & arcTrackerClient unit tests', () => {
     expect(syncedLive.level).toBe(41);
     expect(syncedLive.syncSource).toBe('arctracker-live');
 
-    // 3. Offline / upstream failure falls back to cached player state
+    // 3. Direct ARC Tracker v2 fallback when proxy returns 502
+    expect(ARCTRACKER_V2_ENDPOINTS).toEqual([
+      'profile',
+      'stash',
+      'loadout',
+      'hideout',
+      'quests',
+      'projects',
+      'blueprints',
+    ]);
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.includes('/api/arctracker/sync')) {
+        return new Response('Bad Gateway', { status: 502 });
+      }
+      if (url.endsWith('/profile')) {
+        return new Response(
+          JSON.stringify({ username: 'DirectV2_Raider', level: 50, raiderCoins: 99000 }),
+          { status: 200 },
+        );
+      }
+      if (url.endsWith('/hideout')) {
+        return new Response(
+          JSON.stringify({ hideoutLevels: { gunsmith: 3, refiner: 3 } }),
+          { status: 200 },
+        );
+      }
+      return new Response(JSON.stringify({}), { status: 200 });
+    });
+
+    const directV2Synced = await syncPlayerState(liveCreds);
+    expect(directV2Synced.username).toBe('DirectV2_Raider');
+    expect(directV2Synced.hideoutLevels.gunsmith).toBe(3);
+
+    // 4. Offline / upstream failure falls back to cached player state
     fetchMock.mockRejectedValue(new Error('Network offline'));
     const offlineFallback = await syncPlayerState(liveCreds);
-    expect(offlineFallback.username).toBe('LiveRaider_Valkyrie');
+    expect(offlineFallback.username).toBe('DirectV2_Raider');
   });
 
-  it('fetches live map conditions with fallback to DEFAULT_LIVE_MAP_CONDITIONS and builds catalog summary', async () => {
-    vi.spyOn(globalThis, 'fetch').mockRejectedValueOnce(new Error('Timeout'));
-    const conditions = await fetchLiveMapConditions();
-    expect(conditions).toEqual(DEFAULT_LIVE_MAP_CONDITIONS);
+  it('fetches live map conditions from MetaForge with fallback to getDefaultLiveMapConditions and builds catalog summary', async () => {
+    // 1. Online MetaForge response
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          events: [
+            {
+              mapName: 'The Spaceport',
+              activeCondition: 'Harvester Queen Event',
+              hazardLevel: 'Extreme',
+              activeEvents: ['Harvester Landing'],
+              bonusLootTags: ['Queen Core'],
+              expiresInMinutes: 18,
+            },
+          ],
+        }),
+        { status: 200 },
+      ),
+    );
+    const liveConditions = await fetchLiveMapConditions();
+    expect(liveConditions).toHaveLength(1);
+    expect(liveConditions[0].mapName).toBe('The Spaceport');
+    expect(liveConditions[0].activeCondition).toBe('Harvester Queen Event');
+
+    // 2. Offline fallback
+    fetchSpy.mockRejectedValueOnce(new Error('Timeout'));
+    const fallbackConditions = await fetchLiveMapConditions();
+    expect(fallbackConditions).toEqual(DEFAULT_LIVE_MAP_CONDITIONS);
+    expect(getDefaultLiveMapConditions()).toEqual(DEFAULT_LIVE_MAP_CONDITIONS);
+
+    // 3. Catalog helpers & summary
+    expect(getCatalogItemById('rattler_ar')?.name).toContain('Rattler');
+    expect(searchCatalogItems('leaper').length).toBeGreaterThan(0);
+    const enriched = mergeRemoteCatalogEnrichment([
+      { id: 'rattler_ar', sellValueCoins: 1100 },
+    ]);
+    expect(enriched.find((i) => i.id === 'rattler_ar')?.sellValueCoins).toBe(1100);
 
     const summary = getStaticGameCatalogSummary();
     expect(summary).toContain('ARC RAIDERS STATIC GAME CATALOG DIGEST');
     expect(summary).toContain('ITEMS, RECYCLE YIELDS & DROP ZONES');
+  });
+
+  it('extracts PlayStation NPSSO tokens, Embark JWTs, and syncs PS5 state via syncConsoleStateWithFoundryAi', async () => {
+    const sampleNpsso =
+      '{"npsso":"a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6A7B8C9D0E1F2"}';
+    const extractedNpsso = extractKeysFromText(sampleNpsso);
+    expect(extractedNpsso.psnNpsso).toBe(
+      'a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6A7B8C9D0E1F2',
+    );
+
+    const sampleEmbarkJwt =
+      '{"accessToken":"eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJwc24tMTIzIn0.signature123"}';
+    const extractedJwt = extractKeysFromText(sampleEmbarkJwt);
+    expect(extractedJwt.embarkAccessToken).toBe(
+      'eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJwc24tMTIzIn0.signature123',
+    );
+
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          ok: true,
+          modelUsed: 'gpt-6-astra',
+          patch: {
+            summary: 'Synced PS5 Stash: 4 Leaper Pulse Units and Gunsmith L3.',
+            detectedUsername: 'GhostRaider_PS5',
+            detectedLevel: 29,
+            detectedCoins: 42000,
+            stashUpdates: [
+              { itemId: 'leaper_pulse_unit', quantity: 4, mode: 'set' },
+            ],
+            hideoutLevelUpdates: { gunsmith: 3 },
+          },
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+
+    const baseState = createDemoPlayerProgressState();
+    const syncRes = await syncConsoleStateWithFoundryAi({
+      transcript: 'PS5: I have 4 Leaper Pulse Units and Gunsmith L3',
+      currentState: baseState,
+    });
+
+    expect(syncRes.ok).toBe(true);
+    expect(syncRes.updatedState.username).toBe('GhostRaider_PS5');
+    expect(syncRes.updatedState.platform).toBe('ps5');
+    expect(syncRes.updatedState.syncSource).toBe('console-vision-sync');
+    expect(syncRes.updatedState.hideoutLevels.gunsmith).toBe(3);
+    const leaperSlot = syncRes.updatedState.stash.find(
+      (s) => s.itemId === 'leaper_pulse_unit',
+    );
+    expect(leaperSlot?.quantity).toBe(4);
   });
 });

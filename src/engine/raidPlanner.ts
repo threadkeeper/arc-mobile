@@ -313,6 +313,11 @@ export function buildTab2RaidPlan(
     (player.loadout.augmentId && ITEMS_BY_ID[player.loadout.augmentId]?.name) ||
     'Looter Augment Mk.2';
 
+  const isLightOrMinimalKit =
+    !player.loadout.primaryWeaponId ||
+    player.loadout.shieldId === 'light_shield' ||
+    !player.loadout.shieldId;
+
   const recommendedKitSummary = `${primaryWeaponName} + ${secondaryWeaponName} | ${shieldName} | ${augmentName} | Field Medkit + Shield Recharger + Smoke Grenade`;
 
   // Score each available map condition by how many missing items drop there
@@ -329,11 +334,14 @@ export function buildTab2RaidPlan(
       0
     );
 
+    const hazardPenalty =
+      isLightOrMinimalKit && cond.hazardLevel === 'Extreme' ? 15 : 0;
+
     return {
       cond,
       template,
       matchingMissing,
-      totalScore: template.baseExcitement + missingScore,
+      totalScore: template.baseExcitement + missingScore - hazardPenalty,
     };
   });
 
@@ -370,6 +378,25 @@ export function buildTab2RaidPlan(
         ? entry.matchingMissing.map((m) => m.itemName)
         : entry.template.expectedRewards;
 
+    const baseSteps = entry.template.buildSteps(
+      entry.cond,
+      targetedMissingPlainNames
+    );
+    const steps = isLightOrMinimalKit
+      ? baseSteps.map((step) =>
+          step.phase === 'High-Value Loot'
+            ? {
+                ...step,
+                cautionNote: `${step.cautionNote} Stealth Route Active: Avoid direct Queen/Baron stronghold aggro with Light Shield; loot perimeter caches under smoke cover.`,
+              }
+            : step
+        )
+      : baseSteps;
+
+    const loadoutFitLabel = isLightOrMinimalKit
+      ? `Stealth-Adapted Route for ${primaryWeaponName} & ${shieldName}`
+      : `100% Doable with Equipped ${primaryWeaponName} & ${shieldName}`;
+
     return {
       rank,
       mapSlug: entry.cond.mapSlug,
@@ -377,13 +404,13 @@ export function buildTab2RaidPlan(
       raidTitle: entry.template.defaultTitle,
       activeCondition: entry.cond.activeCondition,
       doableWithCurrentLoadout: true,
-      loadoutFitLabel: `100% Doable with Equipped ${primaryWeaponName} & ${shieldName}`,
+      loadoutFitLabel,
       recommendedKitSummary,
       expectedRewards: entry.template.expectedRewards,
       targetedMissingItems,
       estimatedCoinYield: entry.template.estimatedCoinYield,
       excitementScore: Math.min(99, entry.template.baseExcitement - idx * 2),
-      steps: entry.template.buildSteps(entry.cond, targetedMissingPlainNames),
+      steps,
     };
   });
 

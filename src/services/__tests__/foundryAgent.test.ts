@@ -3,8 +3,11 @@ import { DEMO_PLAYER_STATE } from '../../data/gameCatalog';
 import {
   DEFAULT_FOUNDRY_ENDPOINT,
   DEFAULT_FOUNDRY_MODEL,
+  FALLBACK_FOUNDRY_MODEL,
+  FOUNDRY_GAME_CONTEXT_TOOLS,
   buildDeterministicBaselinePlan,
   buildFoundryAgentRequestPayload,
+  executeFoundryFunctionCall,
   mergeFoundryInsightIntoPlan,
   runAutonomousFoundryAgent,
 } from '../foundryAgent';
@@ -14,7 +17,7 @@ describe('foundryAgent service (gaia-foundry-202045 / gpt-6-astra)', () => {
     vi.restoreAllMocks();
   });
 
-  it('buildFoundryAgentRequestPayload builds a valid Responses API request with web_search tool and catalog summary', () => {
+  it('buildFoundryAgentRequestPayload builds a valid Responses API request with web_search, function tools, and catalog summary', () => {
     const baseline = buildDeterministicBaselinePlan(DEMO_PLAYER_STATE);
     const payload = buildFoundryAgentRequestPayload(DEMO_PLAYER_STATE, baseline);
 
@@ -22,10 +25,14 @@ describe('foundryAgent service (gaia-foundry-202045 / gpt-6-astra)', () => {
       'https://gaia-foundry-202045.openai.azure.com/openai/v1/responses'
     );
     expect(DEFAULT_FOUNDRY_MODEL).toBe('gpt-6-astra');
+    expect(FALLBACK_FOUNDRY_MODEL).toBe('model-router');
 
     expect(payload.model).toBe('gpt-6-astra');
     expect(payload.store).toBe(false);
-    expect(payload.tools).toEqual([{ type: 'web_search' }]);
+    expect(payload.tools).toEqual([
+      { type: 'web_search' },
+      ...FOUNDRY_GAME_CONTEXT_TOOLS,
+    ]);
     expect(payload.include).toEqual(['web_search_call.action.sources']);
 
     const input = payload.input as Array<{ role: string; content: string }>;
@@ -40,6 +47,49 @@ describe('foundryAgent service (gaia-foundry-202045 / gpt-6-astra)', () => {
     expect(input[1].role).toBe('user');
     expect(input[1].content).toContain(DEMO_PLAYER_STATE.username);
     expect(input[1].content).toContain('ARC RAIDERS STATIC GAME CATALOG DIGEST');
+  });
+
+  it('executeFoundryFunctionCall returns exact deterministic data for prep, raid options, and missing items', () => {
+    const baseline = buildDeterministicBaselinePlan(DEMO_PLAYER_STATE);
+
+    const prepJson = JSON.parse(
+      executeFoundryFunctionCall(
+        'get_five_raid_prep_status',
+        '{}',
+        DEMO_PLAYER_STATE,
+        baseline
+      )
+    );
+    expect(prepJson.readiness).toEqual(baseline.tab1Prep.readiness);
+    expect(prepJson.totalProjectedCoinsFromSales).toBe(
+      baseline.tab1Prep.totalProjectedCoinsFromSales
+    );
+
+    const raidJson = JSON.parse(
+      executeFoundryFunctionCall(
+        'get_live_map_raid_options',
+        JSON.stringify({ mapSlug: 'dam-battleground' }),
+        DEMO_PLAYER_STATE,
+        baseline
+      )
+    );
+    expect(
+      raidJson.liveMapConditions.every(
+        (c: { mapSlug: string }) => c.mapSlug === 'dam-battleground'
+      )
+    ).toBe(true);
+
+    const missingJson = JSON.parse(
+      executeFoundryFunctionCall(
+        'get_missing_upgrade_items',
+        '{}',
+        DEMO_PLAYER_STATE,
+        baseline
+      )
+    );
+    expect(missingJson.missingRequiredItems).toEqual(
+      baseline.tab3InventorySmash.missingRequiredItems
+    );
   });
 
   it('mergeFoundryInsightIntoPlan extracts web_search citations and merges summaries while preserving Rule 1a/1b/1c and Tab 3 invariants', () => {
@@ -141,6 +191,87 @@ describe('foundryAgent service (gaia-foundry-202045 / gpt-6-astra)', () => {
     );
   });
 
+  it('runAutonomousFoundryAgent executes multi-turn function_call loop with web_search and preserves deterministic numbers', async () => {
+    const baseline = buildDeterministicBaselinePlan(DEMO_PLAYER_STATE);
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 'resp_turn_1',
+          model: 'gpt-6-astra',
+          output: [
+            {
+              type: 'web_search_call',
+              action: {
+                sources: [{ url: 'https://metaforge.app/arc-raiders/live-events' }],
+              },
+            },
+            {
+              type: 'function_call',
+              call_id: 'call_prep_01',
+              name: 'get_five_raid_prep_status',
+              arguments: '{}',
+            },
+            {
+              type: 'function_call',
+              call_id: 'call_missing_01',
+              name: 'get_missing_upgrade_items',
+              arguments: '{}',
+            },
+          ],
+        }),
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          id: 'resp_turn_2',
+          model: 'gpt-6-astra',
+          output_text: JSON.stringify({
+            tab1Summary: 'Autonomous Loop Tab 1 Summary after tool inspection',
+            tab2Commentary: 'Autonomous Loop Tab 2 Commentary after tool inspection',
+            tab3FarmingTip: 'Autonomous Loop Tab 3 Farming Tip after tool inspection',
+          }),
+        }),
+      });
+
+    vi.stubGlobal('fetch', fetchMock);
+
+    const plan = await runAutonomousFoundryAgent(DEMO_PLAYER_STATE);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const secondCallBody = JSON.parse(fetchMock.mock.calls[1][1].body as string);
+    expect(secondCallBody.store).toBe(false);
+    expect(
+      secondCallBody.input.some(
+        (item: { type?: string; call_id?: string }) =>
+          item.type === 'function_call_output' && item.call_id === 'call_prep_01'
+      )
+    ).toBe(true);
+
+    expect(plan.usedLiveWebSearch).toBe(true);
+    expect(plan.webSearchCitations).toContain(
+      'https://metaforge.app/arc-raiders/live-events'
+    );
+    expect(plan.tab1Prep.agentTacticalSummary).toBe(
+      'Autonomous Loop Tab 1 Summary after tool inspection'
+    );
+    expect(plan.tab2Raids.agentRouteCommentary).toBe(
+      'Autonomous Loop Tab 2 Commentary after tool inspection'
+    );
+    expect(plan.tab3InventorySmash.agentFarmingTip).toBe(
+      'Autonomous Loop Tab 3 Farming Tip after tool inspection'
+    );
+    expect(plan.tab1Prep.totalProjectedCoinsFromSales).toBe(
+      baseline.tab1Prep.totalProjectedCoinsFromSales
+    );
+    expect(plan.tab3InventorySmash.missingRequiredItems).toEqual(
+      baseline.tab3InventorySmash.missingRequiredItems
+    );
+  });
+
   it('runAutonomousFoundryAgent falls back cleanly to deterministic plan when proxy is offline', async () => {
     vi.stubGlobal(
       'fetch',
@@ -197,3 +328,4 @@ describe('foundryAgent service (gaia-foundry-202045 / gpt-6-astra)', () => {
     );
   });
 });
+

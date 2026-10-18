@@ -9,6 +9,8 @@ export const DEMO_USER_API_KEY = 'arc_u1_demo_raider_key';
 
 const USER_KEY_REGEX = /arc_u1_[A-Za-z0-9_-]+/;
 const APP_KEY_REGEX = /arc_k1_[A-Za-z0-9_-]+/;
+const JWT_REGEX = /eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
+const NPSSO_JSON_REGEX = /"npsso"\s*:\s*"([A-Za-z0-9]{64})"/;
 
 function isValidAuthSource(
   source: unknown,
@@ -18,6 +20,10 @@ function isValidAuthSource(
     source === 'browser-pull' ||
     source === 'clipboard' ||
     source === 'url-param' ||
+    source === 'oauth-pkce' ||
+    source === 'psn-npsso' ||
+    source === 'embark-session' ||
+    source === 'console-vision' ||
     source === 'demo'
   );
 }
@@ -42,6 +48,10 @@ function normalizeCredentials(
     appApiKey,
     savedAt,
     source,
+    ...(input.embarkAccessToken ? { embarkAccessToken: input.embarkAccessToken } : {}),
+    ...(input.psnNpsso ? { psnNpsso: input.psnNpsso } : {}),
+    ...(input.embarkId ? { embarkId: input.embarkId } : {}),
+    ...(input.psnOnlineId ? { psnOnlineId: input.psnOnlineId } : {}),
   };
 }
 
@@ -65,6 +75,10 @@ function parseStoredCredentials(raw: string | null | undefined): AuthCredentials
       appApiKey: parsed.appApiKey,
       savedAt: parsed.savedAt,
       source: parsed.source,
+      embarkAccessToken: parsed.embarkAccessToken,
+      psnNpsso: parsed.psnNpsso,
+      embarkId: parsed.embarkId,
+      psnOnlineId: parsed.psnOnlineId,
     });
   } catch {
     return null;
@@ -283,12 +297,15 @@ export function extractArcKeyFromText(raw: string): string | null {
 }
 
 /**
- * Parses `arc_u1_[A-Za-z0-9_-]+` and `arc_k1_[A-Za-z0-9_-]+` from raw pasted text,
- * URL query strings, URL hashes, or JSON blobs.
+ * Parses `arc_u1_[A-Za-z0-9_-]+`, `arc_k1_[A-Za-z0-9_-]+`, Embark session JWTs (`eyJ...`),
+ * and Sony PSN `npsso` tokens from raw pasted text, URL query strings, URL hashes, or JSON blobs.
  */
 export function extractKeysFromText(raw: string): {
   userApiKey?: string;
   appApiKey?: string;
+  embarkAccessToken?: string;
+  psnNpsso?: string;
+  authSource?: AuthCredentials['source'];
 } {
   if (!raw || typeof raw !== 'string') {
     return {};
@@ -305,13 +322,35 @@ export function extractKeysFromText(raw: string): {
 
   const userMatch = candidateText.match(USER_KEY_REGEX);
   const appMatch = candidateText.match(APP_KEY_REGEX);
+  const jwtMatch = candidateText.match(JWT_REGEX);
+  const npssoMatch = candidateText.match(NPSSO_JSON_REGEX);
+  const urlArcKeyMatch = candidateText.match(/[?&]arcKey=([^&#\s]+)/);
+  const urlAuthSourceMatch = candidateText.match(/[?&]authSource=([^&#\s]+)/);
 
-  const extracted: { userApiKey?: string; appApiKey?: string } = {};
+  const extracted: {
+    userApiKey?: string;
+    appApiKey?: string;
+    embarkAccessToken?: string;
+    psnNpsso?: string;
+    authSource?: AuthCredentials['source'];
+  } = {};
+
   if (userMatch?.[0]) {
     extracted.userApiKey = userMatch[0];
+  } else if (urlArcKeyMatch?.[1]) {
+    extracted.userApiKey = decodeURIComponent(urlArcKeyMatch[1]);
   }
   if (appMatch?.[0]) {
     extracted.appApiKey = appMatch[0];
+  }
+  if (jwtMatch?.[0]) {
+    extracted.embarkAccessToken = jwtMatch[0];
+  }
+  if (npssoMatch?.[1]) {
+    extracted.psnNpsso = npssoMatch[1];
+  }
+  if (urlAuthSourceMatch?.[1] && isValidAuthSource(urlAuthSourceMatch[1])) {
+    extracted.authSource = urlAuthSourceMatch[1];
   }
 
   return extracted;
@@ -319,8 +358,8 @@ export function extractKeysFromText(raw: string): {
 
 /**
  * Checks `window.location.search` and `window.location.hash` first, then tries
- * `navigator.clipboard.readText()` if available. When a valid `arc_u1_...` key is found,
- * saves and returns the `AuthCredentials`.
+ * `navigator.clipboard.readText()` if available. When a valid `arc_u1_...` key,
+ * OAuth token, Embark session JWT, or PSN NPSSO token is found, saves and returns `AuthCredentials`.
  */
 export async function pullAuthFromBrowserEnvironment(): Promise<AuthCredentials | null> {
   const existing = loadAuthCredentials();
@@ -334,7 +373,7 @@ export async function pullAuthFromBrowserEnvironment(): Promise<AuthCredentials 
           userApiKey: fromUrl.userApiKey,
           appApiKey: fromUrl.appApiKey ?? existing?.appApiKey ?? DEFAULT_APP_KEY,
           savedAt: new Date().toISOString(),
-          source: 'url-param',
+          source: fromUrl.authSource ?? 'url-param',
         });
       }
     }
@@ -354,6 +393,24 @@ export async function pullAuthFromBrowserEnvironment(): Promise<AuthCredentials 
           appApiKey: fromClipboard.appApiKey ?? existing?.appApiKey ?? DEFAULT_APP_KEY,
           savedAt: new Date().toISOString(),
           source: 'clipboard',
+        });
+      }
+      if (fromClipboard.embarkAccessToken) {
+        return saveAuthCredentials({
+          userApiKey: `arc_u1_embark_${fromClipboard.embarkAccessToken.slice(-16)}`,
+          appApiKey: existing?.appApiKey ?? DEFAULT_APP_KEY,
+          savedAt: new Date().toISOString(),
+          source: 'embark-session',
+          embarkAccessToken: fromClipboard.embarkAccessToken,
+        });
+      }
+      if (fromClipboard.psnNpsso) {
+        return saveAuthCredentials({
+          userApiKey: `arc_u1_psn_${fromClipboard.psnNpsso.slice(0, 16)}`,
+          appApiKey: existing?.appApiKey ?? DEFAULT_APP_KEY,
+          savedAt: new Date().toISOString(),
+          source: 'psn-npsso',
+          psnNpsso: fromClipboard.psnNpsso,
         });
       }
     } catch {
@@ -388,5 +445,44 @@ export function openArcTrackerKeyPage(
         ? 'https://arctracker.io/ai-connector'
         : 'https://arctracker.io/settings';
     window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
+/**
+ * Opens Embark ID PlayStation Network Federated Sign-In (`id.embark.games`) or the Embark Session JSON page.
+ */
+export function openEmbarkPlayStationAuthPage(
+  step: 'login-psn' | 'session-json' = 'login-psn',
+): void {
+  if (typeof window !== 'undefined' && typeof window.open === 'function') {
+    const url =
+      step === 'session-json'
+        ? 'https://id.embark.games/api/auth/session'
+        : 'https://id.embark.games/api/auth/login?provider=playstation';
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
+/**
+ * Opens Sony PlayStation Network Login or the Sony SSO Cookie endpoint (`ca.account.sony.com/api/v1/ssocookie`).
+ */
+export function openSonyPsnPage(
+  step: 'playstation-login' | 'ssocookie' = 'ssocookie',
+): void {
+  if (typeof window !== 'undefined' && typeof window.open === 'function') {
+    const url =
+      step === 'playstation-login'
+        ? 'https://www.playstation.com/'
+        : 'https://ca.account.sony.com/api/v1/ssocookie';
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
+/**
+ * Starts the 1-Click OAuth2 PKCE login flow with `https://arctracker.io` via our backend proxy.
+ */
+export function startArcTrackerOAuthLogin(): void {
+  if (typeof window !== 'undefined' && window.location) {
+    window.location.assign('/api/auth/arctracker/oauth/start');
   }
 }

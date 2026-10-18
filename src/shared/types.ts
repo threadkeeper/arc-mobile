@@ -111,14 +111,34 @@ export interface PlayerProgressState {
   completedProjectStages: Record<string, number>;
   learnedBlueprintIds: string[];
   syncedAt: string;
-  syncSource: 'arctracker-live' | 'demo-profile';
+  syncSource:
+    | 'arctracker-live'
+    | 'psn-embark-bridge'
+    | 'console-vision-sync'
+    | 'demo-profile';
+  platform?: 'ps5' | 'xbox' | 'pc';
+  embarkId?: string;
+  psnOnlineId?: string;
 }
 
 export interface AuthCredentials {
   userApiKey: string;
   appApiKey: string;
   savedAt: string;
-  source: 'manual' | 'browser-pull' | 'clipboard' | 'url-param' | 'demo';
+  source:
+    | 'manual'
+    | 'browser-pull'
+    | 'clipboard'
+    | 'url-param'
+    | 'oauth-pkce'
+    | 'psn-npsso'
+    | 'embark-session'
+    | 'console-vision'
+    | 'demo';
+  embarkAccessToken?: string;
+  psnNpsso?: string;
+  embarkId?: string;
+  psnOnlineId?: string;
 }
 
 export interface LiveMapCondition {

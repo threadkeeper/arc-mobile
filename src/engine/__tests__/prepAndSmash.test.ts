@@ -52,6 +52,9 @@ describe('ARC Raiders Game Catalog Integrity', () => {
       'fine_wristwatch',
       'red_coral_jewelry',
       'music_box',
+      'dam_surveillance_key',
+      'spaceport_control_tower_key',
+      'buried_city_hospital_key',
     ];
 
     expect(CATALOG_ITEMS.length).toBeGreaterThanOrEqual(requiredItemIds.length);
@@ -185,6 +188,47 @@ describe('Tab 1: Prep Intelligence (5-Raid Loadouts + Rules a, b, c)', () => {
 
     expect(plan.totalProjectedCoinsFromSales).toBe(3600 + 2400 + 3200 + 3000);
   });
+
+  it('protects vault keys under Rule (a), recycles surplus unprotected ARC parts under Rule (b), and flags excess scrap beyond stack cap under Rule (c)', () => {
+    const customPlayer = {
+      ...DEMO_PLAYER_STATE,
+      stash: [
+        ...DEMO_PLAYER_STATE.stash,
+        // Vault key should be protected under Rule (a)
+        { slotIndex: 18, itemId: 'spaceport_control_tower_key', quantity: 1 },
+        // 8 extra wasp_driver -> total 10 owned, 7 needed for future -> 7 protected, 3 recycled
+        { slotIndex: 19, itemId: 'wasp_driver', quantity: 8 },
+        // 50 metal_parts (maxStack 30) -> surplus beyond stack cap after crafting flagged in sellImmediatelyList
+        { slotIndex: 20, itemId: 'metal_parts', quantity: 50 },
+      ],
+    };
+
+    const plan = buildTab1PrepPlan(customPlayer);
+    const keyProtected = plan.protectedRareAndUpgradeItems.find(
+      (p) => p.itemId === 'spaceport_control_tower_key'
+    );
+    expect(keyProtected).toBeDefined();
+    expect(keyProtected!.protectedQuantity).toBe(1);
+
+    const waspProtected = plan.protectedRareAndUpgradeItems.find(
+      (p) => p.itemId === 'wasp_driver'
+    );
+    expect(waspProtected).toBeDefined();
+    expect(waspProtected!.ownedQuantity).toBe(10);
+    expect(waspProtected!.protectedQuantity).toBe(7);
+
+    const waspRecycled = plan.recycleRefineCraftQueue.find(
+      (a) => a.sourceItemId === 'wasp_driver'
+    );
+    expect(waspRecycled).toBeDefined();
+    expect(waspRecycled!.sourceQuantity).toBe(3);
+
+    const excessMetalSold = plan.sellImmediatelyList.find(
+      (s) => s.itemId === 'metal_parts'
+    );
+    expect(excessMetalSold).toBeDefined();
+    expect(excessMetalSold!.quantityToSell).toBeGreaterThan(0);
+  });
 });
 
 describe('Tab 2: Top 3 Raid Ideas (Map Conditions + Doable 4-Step Routes)', () => {
@@ -205,6 +249,26 @@ describe('Tab 2: Top 3 Raid Ideas (Map Conditions + Doable 4-Step Routes)', () =
       ]);
       expect(idea.targetedMissingItems.length).toBeGreaterThan(0);
     }
+  });
+
+  it('adapts loadout feasibility to stealth route when equipped with a Light Shield / pistol kit', () => {
+    const lightKitPlayer = {
+      ...DEMO_PLAYER_STATE,
+      loadout: {
+        ...DEMO_PLAYER_STATE.loadout,
+        primaryWeaponId: null,
+        shieldId: 'light_shield',
+      },
+    };
+
+    const raidPlan = buildTab2RaidPlan(lightKitPlayer);
+    expect(raidPlan.topRaidIdeas[0].loadoutFitLabel).toContain(
+      'Stealth-Adapted Route'
+    );
+    const highValueStep = raidPlan.topRaidIdeas[0].steps.find(
+      (s) => s.phase === 'High-Value Loot'
+    );
+    expect(highValueStep?.cautionNote).toContain('Stealth Route Active');
   });
 });
 

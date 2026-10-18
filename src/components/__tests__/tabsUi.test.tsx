@@ -174,12 +174,26 @@ describe('ARC Mobile 3-Tab Companion UI (tabsUi.test.tsx)', () => {
     expect(screen.getByTestId('tab1-prep-view')).toBeTruthy();
   });
 
-  it('opens the Auth / Pull Key modal when clicked', () => {
+  it('opens the Auth / Pull Key modal when clicked and renders the PlayStation 5 & Console Raider Hub', () => {
     render(<App />);
 
     const authButton = screen.getByRole('button', { name: /Auth \/ Pull Key/i });
     fireEvent.click(authButton);
 
     expect(screen.getByRole('dialog')).toBeTruthy();
+    expect(screen.getByTestId('ps5-console-hub')).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: /1-Click OAuth2 Sign In with ARC Tracker/i,
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: /1\. Login with PlayStation/i }),
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', {
+        name: /AI Sync PS5 Stash, Loadout & Workshop/i,
+      }),
+    ).toBeTruthy();
   });
 });

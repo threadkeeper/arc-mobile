@@ -151,6 +151,10 @@ function buildSafeActionSummary(
     return `KEEP FOR 5-RAID LOADOUTS: Active combat kit readiness reserve.`;
   }
 
+  if (catalogItem && catalogItem.category === 'key') {
+    return `LOCK IN STASH: High-security raid room keycard. Bring in Augment Safe Pocket on matching map.`;
+  }
+
   if (catalogItem && catalogItem.category === 'trinket') {
     const pastNote =
       pastReqs.length > 0

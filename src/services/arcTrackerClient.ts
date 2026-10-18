@@ -1,6 +1,9 @@
 import {
   DEMO_PLAYER_STATE,
   DEFAULT_LIVE_MAP_CONDITIONS,
+  CATALOG_ITEMS,
+  HIDEOUT_REQUIREMENTS,
+  QUEST_REQUIREMENTS,
 } from '../data/gameCatalog';
 import type {
   AuthCredentials,
@@ -9,16 +12,58 @@ import type {
   PlayerProgressState,
   StashSlotItem,
 } from '../shared/types';
-import { DEFAULT_APP_KEY, DEMO_USER_API_KEY } from './authStore';
+import { DEFAULT_APP_KEY, DEMO_USER_API_KEY, saveAuthCredentials } from './authStore';
 
 export const LAST_PLAYER_STATE_STORAGE_KEY = 'arc_mobile_last_player_state_v1';
 
 const ARCTRACKER_PROXY_SYNC_URL = '/api/arctracker/sync';
 const ARCTRACKER_UPSTREAM_BASE = 'https://arctracker.io/api/v2/user';
+export const ARCTRACKER_V2_ENDPOINTS = [
+  'profile',
+  'stash',
+  'loadout',
+  'hideout',
+  'quests',
+  'projects',
+  'blueprints',
+] as const;
 const METAFORGE_EVENT_TIMERS_URL = 'https://metaforge.app/api/arc-raiders/event-timers';
 const DEFAULT_FETCH_TIMEOUT_MS = 4500;
 
-function saveCachedPlayerState(state: PlayerProgressState): void {
+/**
+ * Returns a fresh realistic demo `PlayerProgressState` snapshot.
+ */
+export function createDemoPlayerProgressState(): PlayerProgressState {
+  return {
+    ...DEMO_PLAYER_STATE,
+    stash: DEMO_PLAYER_STATE.stash.map((slot) => ({ ...slot })),
+    loadout: {
+      ...DEMO_PLAYER_STATE.loadout,
+      quickUseItemIds: [...DEMO_PLAYER_STATE.loadout.quickUseItemIds],
+      ammoStacks: DEMO_PLAYER_STATE.loadout.ammoStacks.map((s) => ({ ...s })),
+    },
+    hideoutLevels: { ...DEMO_PLAYER_STATE.hideoutLevels },
+    completedQuestIds: [...DEMO_PLAYER_STATE.completedQuestIds],
+    activeQuestIds: [...DEMO_PLAYER_STATE.activeQuestIds],
+    completedProjectStages: { ...DEMO_PLAYER_STATE.completedProjectStages },
+    learnedBlueprintIds: [...DEMO_PLAYER_STATE.learnedBlueprintIds],
+    syncedAt: new Date().toISOString(),
+    syncSource: 'demo-profile',
+  };
+}
+
+/**
+ * Returns a fresh copy of realistic default live map conditions and event timers.
+ */
+export function getDefaultLiveMapConditions(): LiveMapCondition[] {
+  return DEFAULT_LIVE_MAP_CONDITIONS.map((cond) => ({
+    ...cond,
+    activeEvents: [...cond.activeEvents],
+    bonusLootTags: [...cond.bonusLootTags],
+  }));
+}
+
+export function saveCachedPlayerState(state: PlayerProgressState): void {
   try {
     if (typeof localStorage !== 'undefined') {
       localStorage.setItem(LAST_PLAYER_STATE_STORAGE_KEY, JSON.stringify(state));
@@ -192,6 +237,13 @@ function normalizePlayerState(
         ? envelope.syncedAt
         : new Date().toISOString(),
     syncSource,
+    ...(typeof envelope.platform === 'string'
+      ? { platform: envelope.platform as 'ps5' | 'xbox' | 'pc' }
+      : {}),
+    ...(typeof envelope.embarkId === 'string' ? { embarkId: envelope.embarkId } : {}),
+    ...(typeof envelope.psnOnlineId === 'string'
+      ? { psnOnlineId: envelope.psnOnlineId }
+      : {}),
   };
 }
 
@@ -221,10 +273,22 @@ async function fetchDirectArcTrackerV2(
     Accept: 'application/json',
   };
 
-  const [stashRes, profileRes, loadoutRes] = await Promise.allSettled([
-    fetchWithTimeout(`${ARCTRACKER_UPSTREAM_BASE}/stash`, { method: 'GET', headers }),
+  const [
+    profileRes,
+    stashRes,
+    loadoutRes,
+    hideoutRes,
+    questsRes,
+    projectsRes,
+    blueprintsRes,
+  ] = await Promise.allSettled([
     fetchWithTimeout(`${ARCTRACKER_UPSTREAM_BASE}/profile`, { method: 'GET', headers }),
+    fetchWithTimeout(`${ARCTRACKER_UPSTREAM_BASE}/stash`, { method: 'GET', headers }),
     fetchWithTimeout(`${ARCTRACKER_UPSTREAM_BASE}/loadout`, { method: 'GET', headers }),
+    fetchWithTimeout(`${ARCTRACKER_UPSTREAM_BASE}/hideout`, { method: 'GET', headers }),
+    fetchWithTimeout(`${ARCTRACKER_UPSTREAM_BASE}/quests`, { method: 'GET', headers }),
+    fetchWithTimeout(`${ARCTRACKER_UPSTREAM_BASE}/projects`, { method: 'GET', headers }),
+    fetchWithTimeout(`${ARCTRACKER_UPSTREAM_BASE}/blueprints`, { method: 'GET', headers }),
   ]);
 
   let anySuccess = false;
@@ -264,6 +328,47 @@ async function fetchDirectArcTrackerV2(
     }
   }
 
+  if (hideoutRes.status === 'fulfilled' && hideoutRes.value.ok) {
+    anySuccess = true;
+    const hideoutJson = (await hideoutRes.value.json()) as Record<string, unknown>;
+    if (hideoutJson.hideoutLevels && typeof hideoutJson.hideoutLevels === 'object') {
+      combined.hideoutLevels = hideoutJson.hideoutLevels;
+    } else if (hideoutJson.data && typeof hideoutJson.data === 'object' && !Array.isArray(hideoutJson.data)) {
+      combined.hideoutLevels = hideoutJson.data;
+    }
+  }
+
+  if (questsRes.status === 'fulfilled' && questsRes.value.ok) {
+    anySuccess = true;
+    const questsJson = (await questsRes.value.json()) as Record<string, unknown>;
+    if (Array.isArray(questsJson.completedQuestIds)) {
+      combined.completedQuestIds = questsJson.completedQuestIds;
+    }
+    if (Array.isArray(questsJson.activeQuestIds)) {
+      combined.activeQuestIds = questsJson.activeQuestIds;
+    }
+  }
+
+  if (projectsRes.status === 'fulfilled' && projectsRes.value.ok) {
+    anySuccess = true;
+    const projectsJson = (await projectsRes.value.json()) as Record<string, unknown>;
+    if (projectsJson.completedProjectStages && typeof projectsJson.completedProjectStages === 'object') {
+      combined.completedProjectStages = projectsJson.completedProjectStages;
+    }
+  }
+
+  if (blueprintsRes.status === 'fulfilled' && blueprintsRes.value.ok) {
+    anySuccess = true;
+    const blueprintsJson = (await blueprintsRes.value.json()) as Record<string, unknown>;
+    if (Array.isArray(blueprintsJson)) {
+      combined.learnedBlueprintIds = blueprintsJson;
+    } else if (Array.isArray(blueprintsJson.learnedBlueprintIds)) {
+      combined.learnedBlueprintIds = blueprintsJson.learnedBlueprintIds;
+    } else if (Array.isArray(blueprintsJson.data)) {
+      combined.learnedBlueprintIds = blueprintsJson.data;
+    }
+  }
+
   if (!anySuccess) {
     return null;
   }
@@ -279,10 +384,40 @@ async function fetchDirectArcTrackerV2(
 export async function syncPlayerState(
   creds: AuthCredentials | null,
 ): Promise<PlayerProgressState> {
+  if (
+    creds &&
+    (creds.source === 'psn-npsso' ||
+      creds.source === 'embark-session' ||
+      creds.source === 'console-vision')
+  ) {
+    const cachedConsole = loadCachedPlayerState();
+    const baseState = cachedConsole ?? createDemoPlayerProgressState();
+    const consoleState: PlayerProgressState = {
+      ...baseState,
+      username:
+        creds.embarkId ||
+        creds.psnOnlineId ||
+        (baseState.username !== DEMO_PLAYER_STATE.username
+          ? baseState.username
+          : 'PS5_Raider'),
+      platform: 'ps5',
+      embarkId: creds.embarkId ?? baseState.embarkId,
+      psnOnlineId: creds.psnOnlineId ?? baseState.psnOnlineId,
+      syncSource:
+        creds.source === 'console-vision' || baseState.syncSource === 'console-vision-sync'
+          ? 'console-vision-sync'
+          : 'psn-embark-bridge',
+      syncedAt: new Date().toISOString(),
+    };
+    saveCachedPlayerState(consoleState);
+    return consoleState;
+  }
+
   const userKey = creds?.userApiKey?.trim() ?? '';
   const appKey = creds?.appApiKey?.trim() || DEFAULT_APP_KEY;
   const isLiveKey =
-    userKey.startsWith('arc_u1_') &&
+    (userKey.startsWith('arc_u1_') || creds?.source === 'oauth-pkce') &&
+    userKey.length > 8 &&
     userKey !== DEMO_USER_API_KEY &&
     creds?.source !== 'demo';
 
@@ -468,5 +603,385 @@ export async function fetchLiveMapConditions(): Promise<LiveMapCondition[]> {
     return mapRawEventsToConditions(payload);
   } catch {
     return DEFAULT_LIVE_MAP_CONDITIONS;
+  }
+}
+
+/**
+ * Connects a PlayStation 5 player's Embark ID session token (`https://id.embark.games/api/auth/session`)
+ * and resolves their Embark ID (`Name#1234`) + linked PlayStation Network Online ID.
+ */
+export async function connectEmbarkPlayStationSession(
+  rawSessionTokenOrJson: string,
+  currentState?: PlayerProgressState,
+): Promise<{
+  ok: boolean;
+  credentials?: AuthCredentials;
+  playerState?: PlayerProgressState;
+  embarkId?: string;
+  psnOnlineId?: string;
+  error?: string;
+}> {
+  try {
+    const res = await fetchWithTimeout(
+      '/api/auth/embark/resolve',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rawInput: rawSessionTokenOrJson }),
+      },
+      12000,
+    );
+    const data = (await res.json()) as {
+      ok?: boolean;
+      embarkId?: string;
+      psnOnlineId?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.ok) {
+      return {
+        ok: false,
+        error: data.error || 'Could not resolve Embark PlayStation session.',
+      };
+    }
+
+    const creds = saveAuthCredentials({
+      userApiKey: `arc_u1_embark_${(data.embarkId || 'ps5').replace(/[^A-Za-z0-9]/g, '_')}`,
+      appApiKey: DEFAULT_APP_KEY,
+      savedAt: new Date().toISOString(),
+      source: 'embark-session',
+      embarkAccessToken: rawSessionTokenOrJson.trim(),
+      embarkId: data.embarkId,
+      psnOnlineId: data.psnOnlineId,
+    });
+
+    const base = currentState ?? loadCachedPlayerState() ?? createDemoPlayerProgressState();
+    const updatedState: PlayerProgressState = {
+      ...base,
+      username: data.psnOnlineId
+        ? `${data.psnOnlineId} (${data.embarkId || 'Embark'})`
+        : data.embarkId || base.username,
+      platform: 'ps5',
+      embarkId: data.embarkId,
+      psnOnlineId: data.psnOnlineId,
+      syncSource: 'psn-embark-bridge',
+      syncedAt: new Date().toISOString(),
+    };
+    saveCachedPlayerState(updatedState);
+
+    return {
+      ok: true,
+      credentials: creds,
+      playerState: updatedState,
+      embarkId: data.embarkId,
+      psnOnlineId: data.psnOnlineId,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Network error connecting Embark session.',
+    };
+  }
+}
+
+/**
+ * Connects a PlayStation 5 player's Sony `npsso` token (`ca.account.sony.com/api/v1/ssocookie`)
+ * via Sony PSN Mobile OAuth + Embark ID PlayStation Federated Handshake.
+ */
+export async function connectSonyPsnNpssoBridge(
+  rawNpssoInput: string,
+  currentState?: PlayerProgressState,
+): Promise<{
+  ok: boolean;
+  credentials?: AuthCredentials;
+  playerState?: PlayerProgressState;
+  psnOnlineId?: string;
+  embarkId?: string;
+  error?: string;
+}> {
+  try {
+    const res = await fetchWithTimeout(
+      '/api/auth/playstation/sync',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ npsso: rawNpssoInput }),
+      },
+      15000,
+    );
+    const data = (await res.json()) as {
+      ok?: boolean;
+      psnOnlineId?: string;
+      embarkId?: string;
+      embarkAccessToken?: string;
+      error?: string;
+    };
+    if (!res.ok || !data.ok) {
+      return {
+        ok: false,
+        error: data.error || 'Could not verify PlayStation NPSSO token.',
+      };
+    }
+
+    const creds = saveAuthCredentials({
+      userApiKey: `arc_u1_psn_${(data.psnOnlineId || 'raider').replace(/[^A-Za-z0-9]/g, '_')}`,
+      appApiKey: DEFAULT_APP_KEY,
+      savedAt: new Date().toISOString(),
+      source: 'psn-npsso',
+      psnNpsso: rawNpssoInput.trim(),
+      embarkAccessToken: data.embarkAccessToken,
+      embarkId: data.embarkId,
+      psnOnlineId: data.psnOnlineId,
+    });
+
+    const base = currentState ?? loadCachedPlayerState() ?? createDemoPlayerProgressState();
+    const updatedState: PlayerProgressState = {
+      ...base,
+      username: data.psnOnlineId || data.embarkId || base.username,
+      platform: 'ps5',
+      embarkId: data.embarkId,
+      psnOnlineId: data.psnOnlineId,
+      syncSource: 'psn-embark-bridge',
+      syncedAt: new Date().toISOString(),
+    };
+    saveCachedPlayerState(updatedState);
+
+    return {
+      ok: true,
+      credentials: creds,
+      playerState: updatedState,
+      psnOnlineId: data.psnOnlineId,
+      embarkId: data.embarkId,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      error: err instanceof Error ? err.message : 'Network error during PlayStation NPSSO sync.',
+    };
+  }
+}
+
+function buildCompactCatalogDigest(): string {
+  const itemLines = CATALOG_ITEMS.map(
+    (item) => `${item.id}: "${item.name}" (${item.category}, ${item.rarity})`,
+  ).join('; ');
+  const stationIds = Array.from(
+    new Set(HIDEOUT_REQUIREMENTS.map((h) => `${h.stationId} ("${h.stationName}")`)),
+  ).join(', ');
+  const questLines = QUEST_REQUIREMENTS.map(
+    (q) => `${q.questId}: "${q.questName}" (${q.traderName})`,
+  ).join('; ');
+  return `Canonical Catalog Item IDs: [${itemLines}]\nCanonical Hideout Stations: [${stationIds}]\nCanonical Quests: [${questLines}]`;
+}
+
+/**
+ * Syncs a PlayStation 5 / Console player's Stash, Loadout, Workshop Station Levels, and Quests
+ * using Azure AI Foundry `gpt-6-astra` Multimodal Vision (TV photo / PS App screenshot) or Voice/Text!
+ */
+export async function syncConsoleStateWithFoundryAi(options: {
+  imageDataUrl?: string;
+  transcript?: string;
+  currentState: PlayerProgressState;
+}): Promise<{
+  ok: boolean;
+  summary: string;
+  updatedState: PlayerProgressState;
+  credentials?: AuthCredentials;
+  error?: string;
+}> {
+  try {
+    const res = await fetchWithTimeout(
+      '/api/foundry/console-sync',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageDataUrl: options.imageDataUrl,
+          transcript: options.transcript,
+          catalogDigest: buildCompactCatalogDigest(),
+        }),
+      },
+      30000,
+    );
+
+    const data = (await res.json()) as {
+      ok?: boolean;
+      error?: string;
+      patch?: {
+        summary?: string;
+        detectedUsername?: string | null;
+        detectedLevel?: number | null;
+        detectedCoins?: number | null;
+        stashUpdates?: Array<{
+          itemId?: string;
+          quantity?: number;
+          mode?: string;
+        }>;
+        loadoutUpdates?: Partial<EquippedLoadout>;
+        hideoutLevelUpdates?: Record<string, number>;
+        completedQuestIdsToAdd?: string[];
+        activeQuestIdsToAdd?: string[];
+      };
+    };
+
+    if (!res.ok || !data.ok || !data.patch) {
+      return {
+        ok: false,
+        summary: '',
+        updatedState: options.currentState,
+        error: data.error || 'Foundry Console AI Sync failed.',
+      };
+    }
+
+    const patch = data.patch;
+    const validItemIds = new Set(CATALOG_ITEMS.map((i) => i.id));
+    const nextStashMap = new Map<string, number>();
+    for (const slot of options.currentState.stash) {
+      nextStashMap.set(slot.itemId, (nextStashMap.get(slot.itemId) ?? 0) + slot.quantity);
+    }
+
+    if (Array.isArray(patch.stashUpdates)) {
+      for (const upd of patch.stashUpdates) {
+        if (
+          upd &&
+          typeof upd.itemId === 'string' &&
+          validItemIds.has(upd.itemId) &&
+          typeof upd.quantity === 'number' &&
+          Number.isFinite(upd.quantity)
+        ) {
+          if (upd.mode === 'add') {
+            nextStashMap.set(
+              upd.itemId,
+              Math.max(0, (nextStashMap.get(upd.itemId) ?? 0) + upd.quantity),
+            );
+          } else {
+            if (upd.quantity <= 0) {
+              nextStashMap.delete(upd.itemId);
+            } else {
+              nextStashMap.set(upd.itemId, upd.quantity);
+            }
+          }
+        }
+      }
+    }
+
+    const nextStash: StashSlotItem[] = Array.from(nextStashMap.entries()).map(
+      ([itemId, quantity], idx) => ({
+        slotIndex: idx,
+        itemId,
+        quantity,
+      }),
+    );
+
+    const nextLoadout: EquippedLoadout = {
+      ...options.currentState.loadout,
+    };
+    if (patch.loadoutUpdates && typeof patch.loadoutUpdates === 'object') {
+      if (
+        typeof patch.loadoutUpdates.primaryWeaponId === 'string' &&
+        validItemIds.has(patch.loadoutUpdates.primaryWeaponId)
+      ) {
+        nextLoadout.primaryWeaponId = patch.loadoutUpdates.primaryWeaponId;
+      }
+      if (
+        typeof patch.loadoutUpdates.secondaryWeaponId === 'string' &&
+        validItemIds.has(patch.loadoutUpdates.secondaryWeaponId)
+      ) {
+        nextLoadout.secondaryWeaponId = patch.loadoutUpdates.secondaryWeaponId;
+      }
+      if (
+        typeof patch.loadoutUpdates.shieldId === 'string' &&
+        validItemIds.has(patch.loadoutUpdates.shieldId)
+      ) {
+        nextLoadout.shieldId = patch.loadoutUpdates.shieldId;
+      }
+      if (
+        typeof patch.loadoutUpdates.augmentId === 'string' &&
+        validItemIds.has(patch.loadoutUpdates.augmentId)
+      ) {
+        nextLoadout.augmentId = patch.loadoutUpdates.augmentId;
+      }
+    }
+
+    const nextHideout: Record<string, number> = {
+      ...options.currentState.hideoutLevels,
+    };
+    if (patch.hideoutLevelUpdates && typeof patch.hideoutLevelUpdates === 'object') {
+      for (const [stationId, lvl] of Object.entries(patch.hideoutLevelUpdates)) {
+        if (typeof lvl === 'number' && lvl >= 0 && lvl <= 5) {
+          nextHideout[stationId] = lvl;
+        }
+      }
+    }
+
+    const completedSet = new Set(options.currentState.completedQuestIds);
+    if (Array.isArray(patch.completedQuestIdsToAdd)) {
+      for (const qId of patch.completedQuestIdsToAdd) {
+        if (typeof qId === 'string') {
+          completedSet.add(qId);
+        }
+      }
+    }
+
+    const activeSet = new Set(options.currentState.activeQuestIds);
+    if (Array.isArray(patch.activeQuestIdsToAdd)) {
+      for (const qId of patch.activeQuestIdsToAdd) {
+        if (typeof qId === 'string' && !completedSet.has(qId)) {
+          activeSet.add(qId);
+        }
+      }
+    }
+
+    const updatedState: PlayerProgressState = {
+      ...options.currentState,
+      username:
+        typeof patch.detectedUsername === 'string' && patch.detectedUsername.trim()
+          ? patch.detectedUsername.trim()
+          : options.currentState.username !== DEMO_PLAYER_STATE.username
+            ? options.currentState.username
+            : 'PS5_Raider',
+      level:
+        typeof patch.detectedLevel === 'number' && patch.detectedLevel > 0
+          ? patch.detectedLevel
+          : options.currentState.level,
+      raiderCoins:
+        typeof patch.detectedCoins === 'number' && patch.detectedCoins >= 0
+          ? patch.detectedCoins
+          : options.currentState.raiderCoins,
+      stash: nextStash,
+      loadout: nextLoadout,
+      hideoutLevels: nextHideout,
+      completedQuestIds: Array.from(completedSet),
+      activeQuestIds: Array.from(activeSet),
+      platform: 'ps5',
+      syncSource: 'console-vision-sync',
+      syncedAt: new Date().toISOString(),
+    };
+
+    saveCachedPlayerState(updatedState);
+
+    const creds = saveAuthCredentials({
+      userApiKey: `arc_u1_ps5_vision_${Date.now().toString(36)}`,
+      appApiKey: DEFAULT_APP_KEY,
+      savedAt: new Date().toISOString(),
+      source: 'console-vision',
+      psnOnlineId: updatedState.psnOnlineId || updatedState.username,
+      embarkId: updatedState.embarkId,
+    });
+
+    return {
+      ok: true,
+      summary:
+        patch.summary ||
+        `Synced ${nextStash.length} stash stacks and workshop levels via Azure AI Foundry (gpt-6-astra).`,
+      updatedState,
+      credentials: creds,
+    };
+  } catch (err) {
+    return {
+      ok: false,
+      summary: '',
+      updatedState: options.currentState,
+      error: err instanceof Error ? err.message : 'Console AI Sync request failed.',
+    };
   }
 }

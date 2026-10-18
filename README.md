@@ -42,7 +42,7 @@ build output, coverage, local environment files, and private key files are exclu
 from Git; never add player token exports or other credentials to the repository.
 
 ```powershell
-# 1. Run the full Vitest suite (24 unit, engine, service, and UI tests)
+# 1. Run the full Vitest suite (30 unit, engine, service, and UI tests)
 npm.cmd test
 
 # 2. Build the production mobile web bundle
@@ -53,4 +53,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\verify-live-foundry.ps1
 
 # 4. Launch the local Foundry proxy (:8787) + mobile web app (:5173)
 powershell -ExecutionPolicy Bypass -File .\scripts\run-local.ps1
+
+# 5. Deploy to Azure Container Apps in rg-gaia (reusing gaiarobotacr202045 + gaia-env-fqs5sba6zmcju)
+powershell -ExecutionPolicy Bypass -File .\scripts\deploy-azure.ps1
 ```
+
+## Live Production URL (`rg-gaia` / `swedencentral`)
+- **Web App:** `https://arc-mobile.salmondesert-a686da9c.swedencentral.azurecontainerapps.io`
+- **Foundry Status & Health Check:** `https://arc-mobile.salmondesert-a686da9c.swedencentral.azurecontainerapps.io/api/foundry/status`

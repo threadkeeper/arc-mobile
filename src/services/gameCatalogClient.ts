@@ -5,13 +5,120 @@ import {
   QUEST_REQUIREMENTS,
   PROJECT_STAGES,
 } from '../data/gameCatalog';
-import type { CatalogItem } from '../shared/types';
+import type {
+  CatalogItem,
+  CraftingRecipe,
+  HideoutLevelRequirement,
+  ProjectStageSpec,
+  QuestRequirementSpec,
+} from '../shared/types';
 
 /**
  * Lookup helper for a single catalog item by ID.
  */
 export function getCatalogItemById(itemId: string): CatalogItem | undefined {
   return CATALOG_ITEMS.find((item) => item.id === itemId);
+}
+
+/**
+ * Returns all static catalog items.
+ */
+export function getAllCatalogItems(): CatalogItem[] {
+  return CATALOG_ITEMS;
+}
+
+/**
+ * Searches catalog items by name, ID, category, or rarity (case-insensitive).
+ */
+export function searchCatalogItems(query: string): CatalogItem[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) {
+    return CATALOG_ITEMS;
+  }
+  return CATALOG_ITEMS.filter(
+    (item) =>
+      item.id.toLowerCase().includes(normalized) ||
+      item.name.toLowerCase().includes(normalized) ||
+      item.category.toLowerCase().includes(normalized) ||
+      item.rarity.toLowerCase().includes(normalized),
+  );
+}
+
+/**
+ * Returns crafting/refining recipes that produce the specified output item ID.
+ */
+export function getRecipesForOutputItem(outputItemId: string): CraftingRecipe[] {
+  return CRAFTING_RECIPES.filter((recipe) => recipe.outputItemId === outputItemId);
+}
+
+/**
+ * Returns static hideout station upgrade requirements.
+ */
+export function getHideoutRequirements(): HideoutLevelRequirement[] {
+  return HIDEOUT_REQUIREMENTS;
+}
+
+/**
+ * Returns static trader quest requirements.
+ */
+export function getQuestRequirements(): QuestRequirementSpec[] {
+  return QUEST_REQUIREMENTS;
+}
+
+/**
+ * Returns static expedition project stage requirements.
+ */
+export function getProjectStages(): ProjectStageSpec[] {
+  return PROJECT_STAGES;
+}
+
+/**
+ * Enriches the static catalog with optional remote item metadata while preserving
+ * deterministic static catalog guarantees (item IDs, recycle yields, and drop locations).
+ */
+export function mergeRemoteCatalogEnrichment(
+  remoteItems?: Array<Partial<CatalogItem> & { id: string }> | null,
+): CatalogItem[] {
+  if (!Array.isArray(remoteItems) || remoteItems.length === 0) {
+    return CATALOG_ITEMS;
+  }
+
+  const remoteById = new Map<string, Partial<CatalogItem> & { id: string }>();
+  for (const entry of remoteItems) {
+    if (entry && typeof entry.id === 'string') {
+      remoteById.set(entry.id, entry);
+    }
+  }
+
+  return CATALOG_ITEMS.map((staticItem) => {
+    const remote = remoteById.get(staticItem.id);
+    if (!remote) {
+      return staticItem;
+    }
+    return {
+      ...staticItem,
+      description:
+        typeof remote.description === 'string' && remote.description.trim().length > 0
+          ? remote.description
+          : staticItem.description,
+      iconUrl:
+        typeof remote.iconUrl === 'string' && remote.iconUrl.trim().length > 0
+          ? remote.iconUrl
+          : staticItem.iconUrl,
+      sellValueCoins:
+        typeof remote.sellValueCoins === 'number' && remote.sellValueCoins > 0
+          ? remote.sellValueCoins
+          : staticItem.sellValueCoins,
+      recycleYields:
+        Array.isArray(remote.recycleYields) && remote.recycleYields.length > 0
+          ? remote.recycleYields
+          : staticItem.recycleYields,
+      dropLocations:
+        Array.isArray(remote.dropLocations) && remote.dropLocations.length > 0
+          ? remote.dropLocations
+          : staticItem.dropLocations,
+    };
+  });
 }
 
 /**

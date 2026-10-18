@@ -113,10 +113,14 @@ export function buildTab1PrepPlan(player: PlayerProgressState): Tab1PrepPlan {
       catalogItem.category === 'arc_part' &&
       (catalogItem.rarity === 'epic' || catalogItem.rarity === 'legendary');
 
-    if (totalFutureNeeded > 0 || isHighTierArcPart) {
-      const protectedQuantity = isHighTierArcPart
-        ? ownedInfo.quantity
-        : Math.min(ownedInfo.quantity, totalFutureNeeded);
+    const isVaultKey =
+      catalogItem !== undefined && catalogItem.category === 'key';
+
+    if (totalFutureNeeded > 0 || isHighTierArcPart || isVaultKey) {
+      const protectedQuantity =
+        isHighTierArcPart || isVaultKey
+          ? ownedInfo.quantity
+          : Math.min(ownedInfo.quantity, totalFutureNeeded);
 
       protectedQtyByItemId[itemId] = protectedQuantity;
 
@@ -130,6 +134,12 @@ export function buildTab1PrepPlan(player: PlayerProgressState): Tab1PrepPlan {
         reasons.push({
           label: `Protected ${catalogItem.rarity.toUpperCase()} ARC Part Reserve`,
           category: 'project',
+          neededQuantity: ownedInfo.quantity,
+        });
+      } else if (reasons.length === 0 && isVaultKey && catalogItem) {
+        reasons.push({
+          label: 'High-Security Raid Vault Key Reserve',
+          category: 'quest',
           neededQuantity: ownedInfo.quantity,
         });
       }
@@ -218,25 +228,29 @@ export function buildTab1PrepPlan(player: PlayerProgressState): Tab1PrepPlan {
   }
 
   // Step 1: Break down non-protected salvage scrap (`damaged_optics`, `frayed_wiring`, `rusted_gear_casing`)
-  // and any other non-protected salvage items that yield base crafting components.
-  const SALVAGE_PRIORITY_IDS = new Set([
-    'damaged_optics',
-    'frayed_wiring',
-    'rusted_gear_casing',
+  // and any other non-protected non-base salvage/ARC parts that yield base crafting components.
+  const BASE_CRAFTING_MATERIAL_IDS = new Set([
+    'metal_parts',
+    'rubber_parts',
+    'electronic_components',
+    'arc_alloy',
+    'arc_powercell',
+    'durable_cloth',
+    'antiseptic',
   ]);
 
   for (const [itemId, ownedInfo] of Object.entries(ownedMap)) {
     const catalogItem = ITEMS_BY_ID[itemId];
     if (!catalogItem) continue;
     if (LOADOUT_CATEGORIES.has(catalogItem.category)) continue;
-    if (catalogItem.category === 'trinket') continue;
+    if (catalogItem.category === 'trinket' || catalogItem.category === 'key') {
+      continue;
+    }
+    if (BASE_CRAFTING_MATERIAL_IDS.has(itemId)) continue;
 
     const protectedQty = protectedQtyByItemId[itemId] ?? 0;
     const unprotectedQty = Math.max(0, ownedInfo.quantity - protectedQty);
     if (unprotectedQty <= 0) continue;
-
-    const isSalvageScrap = SALVAGE_PRIORITY_IDS.has(itemId);
-    if (!isSalvageScrap) continue;
 
     const refineRecipe = refineRecipesByIngredient[itemId];
     const stationLevel = refineRecipe
@@ -390,6 +404,31 @@ export function buildTab1PrepPlan(player: PlayerProgressState): Tab1PrepPlan {
         )
         .join(' + ')}).`,
     });
+  }
+
+  // Rule (c) continued: Flag any remaining unprotected common scrap beyond stack caps for immediate sale
+  for (const [itemId, ownedInfo] of Object.entries(ownedMap)) {
+    const catalogItem = ITEMS_BY_ID[itemId];
+    if (!catalogItem) continue;
+    if (catalogItem.category !== 'material') continue;
+
+    const remainingUnprotected = availableCraftingPool[itemId] ?? 0;
+    if (remainingUnprotected > catalogItem.maxStack) {
+      const excessQty = remainingUnprotected - catalogItem.maxStack;
+      const slotsFreed = Math.floor(excessQty / catalogItem.maxStack);
+      sellImmediatelyList.push({
+        itemId,
+        itemName: catalogItem.name,
+        rarity: catalogItem.rarity,
+        quantityToSell: excessQty,
+        unitCoins: catalogItem.sellValueCoins,
+        totalCoins: excessQty * catalogItem.sellValueCoins,
+        slotsFreed,
+        reason: `Surplus common material exceeding stack cap (${catalogItem.maxStack}) after 5-raid prep — sell ${excessQty}x for ${
+          excessQty * catalogItem.sellValueCoins
+        } Raider Coins.`,
+      });
+    }
   }
 
   const totalProjectedCoinsFromSales = sellImmediatelyList.reduce(

@@ -1,6 +1,15 @@
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import {
+  startArcTrackerOAuthFlow,
+  completeArcTrackerOAuthCallback,
+  resolveEmbarkSessionToken,
+  syncPlayStationNpssoAndEmbark,
+  runConsoleAiStateSync,
+} from './consoleAuthBridge.ts';
 
 export const FOUNDRY_ENDPOINT =
   process.env.FOUNDRY_ENDPOINT ||
@@ -9,9 +18,12 @@ export const PRIMARY_MODEL = process.env.FOUNDRY_MODEL || 'gpt-6-astra';
 export const FALLBACK_MODEL = 'model-router';
 export const RESOURCE_GROUP = 'rg-gaia';
 export const FOUNDRY_ACCOUNT = 'gaia-foundry-202045';
-export const DEFAULT_PORT = Number(process.env.FOUNDRY_PROXY_PORT || 8787);
+export const DEFAULT_PORT = Number(
+  process.env.FOUNDRY_PROXY_PORT || process.env.PORT || 8787
+);
 
 const AZ_PYTHON_PATH = 'C:\\Users\\Admin\\azcli-venv\\Scripts\\python.exe';
+const GAIA_ENV_PATH = 'C:\\repos\\gaia-robot\\infra\\.env';
 const TOKEN_TTL_MS = 45 * 60 * 1000;
 
 let cachedAadToken: string | null = null;
@@ -23,14 +35,35 @@ export interface FoundryAuthCredentials {
   headerValue?: string;
 }
 
+function readGaiaEnvApiKey(): string | null {
+  try {
+    if (!fs.existsSync(GAIA_ENV_PATH)) {
+      return null;
+    }
+    const content = fs.readFileSync(GAIA_ENV_PATH, 'utf8');
+    for (const rawLine of content.split(/\r?\n/)) {
+      const match = rawLine.match(/^\s*FOUNDRY_API_KEY\s*=\s*(.+)\s*$/);
+      if (match) {
+        const cleaned = match[1].trim().replace(/^['"]|['"]$/g, '');
+        if (cleaned.length > 0) {
+          return cleaned;
+        }
+      }
+    }
+  } catch {
+    // Ignore unreadable .env
+  }
+  return null;
+}
+
 /**
  * Resolves authentication for gaia-foundry-202045 (rg-gaia):
- * 1. FOUNDRY_API_KEY env var
+ * 1. FOUNDRY_API_KEY env var (or C:\repos\gaia-robot\infra\.env if configured)
  * 2. FOUNDRY_AAD_TOKEN env var
  * 3. Keyless Azure CLI token minting via C:\Users\Admin\azcli-venv\Scripts\python.exe -m azure.cli
  */
 export function resolveFoundryAuth(): FoundryAuthCredentials {
-  const apiKey = process.env.FOUNDRY_API_KEY?.trim();
+  const apiKey = process.env.FOUNDRY_API_KEY?.trim() || readGaiaEnvApiKey();
   if (apiKey) {
     return {
       mode: 'api-key',
@@ -94,6 +127,102 @@ export function resolveFoundryAuth(): FoundryAuthCredentials {
   }
 
   return { mode: 'none' };
+}
+
+/**
+ * Resolves Azure AI Foundry credentials including Azure Container Apps Managed Identity
+ * (`IDENTITY_ENDPOINT` + `IDENTITY_HEADER` or IMDS) when running in production (`rg-gaia`).
+ */
+export async function resolveFoundryAuthAsync(): Promise<FoundryAuthCredentials> {
+  const syncAuth = resolveFoundryAuth();
+  if (syncAuth.mode !== 'none') {
+    return syncAuth;
+  }
+
+  const identityEndpoint = process.env.IDENTITY_ENDPOINT;
+  const identityHeader = process.env.IDENTITY_HEADER;
+  const now = Date.now();
+
+  if (identityEndpoint && identityHeader) {
+    for (const resource of [
+      'https://ai.azure.com',
+      'https://cognitiveservices.azure.com',
+    ]) {
+      try {
+        const url = `${identityEndpoint}?api-version=2019-08-01&resource=${encodeURIComponent(
+          resource
+        )}`;
+        const res = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'X-IDENTITY-HEADER': identityHeader,
+            Metadata: 'true',
+          },
+        });
+        if (res.ok) {
+          const data = (await res.json()) as { access_token?: string };
+          if (data.access_token && data.access_token.length > 20) {
+            cachedAadToken = data.access_token;
+            cachedTokenExpiresAt = now + TOKEN_TTL_MS;
+            return {
+              mode: 'aad-bearer',
+              headerName: 'Authorization',
+              headerValue: `Bearer ${data.access_token}`,
+            };
+          }
+        }
+      } catch {
+        // Try next resource or fallback
+      }
+    }
+  }
+
+  return { mode: 'none' };
+}
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.mjs': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.ico': 'image/x-icon',
+};
+
+function tryServeStaticAsset(urlPath: string, res: http.ServerResponse): boolean {
+  const distDir = path.resolve(process.cwd(), 'dist');
+  if (!fs.existsSync(distDir)) {
+    return false;
+  }
+
+  const cleanRel = urlPath === '/' ? 'index.html' : urlPath.replace(/^\/+/, '');
+  const candidate = path.resolve(distDir, cleanRel);
+  if (!candidate.startsWith(distDir)) {
+    return false;
+  }
+
+  let fileToServe = candidate;
+  if (!fs.existsSync(fileToServe) || fs.statSync(fileToServe).isDirectory()) {
+    const fallbackIndex = path.join(distDir, 'index.html');
+    if (!path.extname(cleanRel) && fs.existsSync(fallbackIndex)) {
+      fileToServe = fallbackIndex;
+    } else {
+      return false;
+    }
+  }
+
+  const ext = path.extname(fileToServe).toLowerCase();
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream';
+  const content = fs.readFileSync(fileToServe);
+  res.writeHead(200, {
+    'Content-Type': contentType,
+    'Cache-Control': ext === '.html' ? 'no-cache' : 'public, max-age=31536000, immutable',
+  });
+  res.end(content);
+  return true;
 }
 
 function readJsonBody(req: http.IncomingMessage): Promise<Record<string, unknown>> {
@@ -171,6 +300,30 @@ async function callFoundryResponsesApi(
         data: json,
         modelUsed: String(primaryPayload.model),
       };
+    }
+
+    // If primary model rejected custom function tool schema, retry primary model with web_search only
+    if (
+      Array.isArray(primaryPayload.tools) &&
+      primaryPayload.tools.length > 1
+    ) {
+      const webSearchOnlyPayload: Record<string, unknown> = {
+        ...primaryPayload,
+        tools: [{ type: 'web_search' }],
+      };
+      const retryPrimaryRes = await fetch(FOUNDRY_ENDPOINT, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(webSearchOnlyPayload),
+      });
+      if (retryPrimaryRes.ok) {
+        const retryJson = await retryPrimaryRes.json();
+        return {
+          status: retryPrimaryRes.status,
+          data: retryJson,
+          modelUsed: String(primaryPayload.model),
+        };
+      }
     }
 
     // Fallback to model-router if primary deployment fails
@@ -342,8 +495,8 @@ export function createFoundryProxyServer(): http.Server {
       return;
     }
 
-    if (method === 'GET' && url === '/api/foundry/status') {
-      const auth = resolveFoundryAuth();
+    if (method === 'GET' && (url === '/api/foundry/status' || url === '/healthz')) {
+      const auth = await resolveFoundryAuthAsync();
       sendJson(res, 200, {
         ok: true,
         foundryEndpoint: FOUNDRY_ENDPOINT,
@@ -364,7 +517,7 @@ export function createFoundryProxyServer(): http.Server {
           body && typeof body.payload === 'object' && body.payload !== null
             ? (body.payload as Record<string, unknown>)
             : body;
-        const auth = resolveFoundryAuth();
+        const auth = await resolveFoundryAuthAsync();
         const result = await callFoundryResponsesApi(payload, auth);
         sendJson(res, result.status, result.data);
       } catch (err) {
@@ -389,6 +542,112 @@ export function createFoundryProxyServer(): http.Server {
       return;
     }
 
+    if (method === 'GET' && url === '/api/auth/arctracker/oauth/start') {
+      try {
+        const proto =
+          (req.headers['x-forwarded-proto'] as string) ||
+          (req.headers.host?.includes('azurecontainerapps.io') ? 'https' : 'http');
+        const host = req.headers.host || `127.0.0.1:${DEFAULT_PORT}`;
+        const originUrl = `${proto}://${host}`;
+        const authorizeRedirectUrl = await startArcTrackerOAuthFlow(originUrl);
+        res.writeHead(302, { Location: authorizeRedirectUrl });
+        res.end();
+      } catch (err) {
+        sendJson(res, 502, {
+          ok: false,
+          error:
+            err instanceof Error
+              ? err.message
+              : 'Failed to start ARC Tracker OAuth2 flow',
+        });
+      }
+      return;
+    }
+
+    if (method === 'GET' && url === '/api/auth/arctracker/callback') {
+      try {
+        const rawQuery = (req.url || '').split('?')[1] || '';
+        const params = new URLSearchParams(rawQuery);
+        const result = await completeArcTrackerOAuthCallback(params);
+        res.writeHead(302, { Location: result.redirectUrl });
+        res.end();
+      } catch (err) {
+        res.writeHead(302, {
+          Location: `/?authError=${encodeURIComponent(
+            err instanceof Error ? err.message : 'oauth_callback_error'
+          )}`,
+        });
+        res.end();
+      }
+      return;
+    }
+
+    if (method === 'POST' && url === '/api/auth/embark/resolve') {
+      try {
+        const body = await readJsonBody(req);
+        const rawToken =
+          typeof body.accessToken === 'string'
+            ? body.accessToken
+            : typeof body.rawInput === 'string'
+              ? body.rawInput
+              : '';
+        const resolved = await resolveEmbarkSessionToken(rawToken);
+        sendJson(res, resolved.ok ? 200 : 400, resolved);
+      } catch (err) {
+        sendJson(res, 400, {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Failed to resolve Embark session',
+        });
+      }
+      return;
+    }
+
+    if (method === 'POST' && url === '/api/auth/playstation/sync') {
+      try {
+        const body = await readJsonBody(req);
+        const rawNpsso =
+          typeof body.npsso === 'string'
+            ? body.npsso
+            : typeof body.rawInput === 'string'
+              ? body.rawInput
+              : '';
+        const psnResult = await syncPlayStationNpssoAndEmbark(rawNpsso);
+        sendJson(res, psnResult.ok ? 200 : 400, psnResult);
+      } catch (err) {
+        sendJson(res, 400, {
+          ok: false,
+          error: err instanceof Error ? err.message : 'PlayStation NPSSO sync failed',
+        });
+      }
+      return;
+    }
+
+    if (method === 'POST' && url === '/api/foundry/console-sync') {
+      try {
+        const body = await readJsonBody(req);
+        const auth = await resolveFoundryAuthAsync();
+        const result = await runConsoleAiStateSync(
+          body,
+          FOUNDRY_ENDPOINT,
+          PRIMARY_MODEL,
+          auth
+        );
+        sendJson(res, result.status, result.data);
+      } catch (err) {
+        sendJson(res, 400, {
+          ok: false,
+          error: err instanceof Error ? err.message : 'Console AI state sync failed',
+        });
+      }
+      return;
+    }
+
+    if ((method === 'GET' || method === 'HEAD') && !url.startsWith('/api/')) {
+      if (tryServeStaticAsset(url, res)) {
+        return;
+      }
+    }
+
     sendJson(res, 404, { ok: false, error: `Route not found: ${method} ${url}` });
   });
 }
@@ -398,10 +657,11 @@ const isMainModule =
   fileURLToPath(import.meta.url).toLowerCase() === process.argv[1].toLowerCase();
 
 if (isMainModule) {
+  const bindHost = process.env.HOST || '0.0.0.0';
   const server = createFoundryProxyServer();
-  server.listen(DEFAULT_PORT, '127.0.0.1', () => {
+  server.listen(DEFAULT_PORT, bindHost, () => {
     console.log(
-      `[arc-mobile foundryProxy] Listening on http://127.0.0.1:${DEFAULT_PORT} -> ${FOUNDRY_ENDPOINT} (${PRIMARY_MODEL} in ${RESOURCE_GROUP})`
+      `[arc-mobile foundryProxy] Listening on http://${bindHost}:${DEFAULT_PORT} -> ${FOUNDRY_ENDPOINT} (${PRIMARY_MODEL} in ${RESOURCE_GROUP})`
     );
   });
 }
